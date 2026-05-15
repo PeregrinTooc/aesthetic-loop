@@ -61,10 +61,30 @@ class Bob:
                 f"Starting prompt:\n{current_prompt}\n\n"
                 "Polish this into a strong Stable Diffusion prompt."
             )
-        return _chat(BOB_HOST, BOB_MODEL, BOB_SYSTEM, user_msg)
+        result = _chat(BOB_HOST, BOB_MODEL, BOB_SYSTEM, user_msg)
+        try:
+            requests.post(
+                f"{BOB_HOST}/api/generate",
+                json={"model": BOB_MODEL, "keep_alive": 0},
+                timeout=10,
+            )
+            print("  [Bob] model unloaded from VRAM")
+        except Exception:
+            pass
+        return result
 
 
 class Alice:
     def critique(self, description: str) -> str:
         user_msg = f"Image description:\n{description}"
-        return _chat(ALICE_HOST, ALICE_MODEL, ALICE_SYSTEM, user_msg)
+        result = _chat(ALICE_HOST, ALICE_MODEL, ALICE_SYSTEM, user_msg)
+        try:
+            requests.post(
+                f"{ALICE_HOST}/api/generate",
+                json={"model": ALICE_MODEL, "keep_alive": 0},
+                timeout=10,
+            )
+            print("  [Alice] model unloaded from VRAM")
+        except Exception:
+            pass
+        return result

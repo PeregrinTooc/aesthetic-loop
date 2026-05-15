@@ -15,6 +15,8 @@ if not os.path.exists(history_path):
     print(f"Not found: {history_path}", file=sys.stderr)
     sys.exit(1)
 
+open(out_path, "w").close()
+
 with open(history_path) as f:
     history = json.load(f)
 

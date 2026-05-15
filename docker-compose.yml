@@ -6,17 +6,27 @@ volumes:
 
 services:
   bob:
-    image: ollama/ollama
+    image: ollama/ollama:rocm
     networks: [aesthetic_net]
     volumes:
       - ollama_models:/root/.ollama
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION:-}
     restart: unless-stopped
 
   alice:
-    image: ollama/ollama
+    image: ollama/ollama:rocm
     networks: [aesthetic_net]
     volumes:
       - ollama_models:/root/.ollama
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION:-}
     restart: unless-stopped
 
   dylan:
