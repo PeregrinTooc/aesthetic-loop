@@ -28,55 +28,10 @@ Bob and Alice are backed by different model families intentionally. Divergent ar
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Docker: aesthetic_net                 │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │              orchestrator container               │  │
-│  │                                                   │  │
-│  │   ┌─────────┐   prompt   ┌─────────────────────┐ │  │
-│  │   │   Bob   │──────────▶ │  paint_image (tool) │ │  │
-│  │   │ (agent) │            └──────────┬──────────┘ │  │
-│  │   └────▲────┘                       │ HTTP POST  │  │
-│  │        │ critique                   │            │  │
-│  │   ┌────┴────┐            ┌──────────▼──────────┐ │  │
-│  │   │  Alice  │◀── text ── │ describe_img (tool) │ │  │
-│  │   │ (agent) │            └──────────┬──────────┘ │  │
-│  │   └─────────┘                       │ HTTP POST  │  │
-│  └─────────────────────────────────────┼────────────┘  │
-│                                        │               │
-│  ┌─────────────────┐    host gateway   │               │
-│  │  ollama (rocm)  │                   │               │
-│  │  Bob / Alice /  │                   │               │
-│  │  Dylan models   │                   │               │
-│  └─────────────────┘                   │               │
-└────────────────────────────────────────┼───────────────┘
-                                         │ host.docker.internal
-                            ─ ─ ─ ─ ─ ─ ▼ ─ ─ ─ ─ ─ ─ ─
-                            │         HOST                │
-                            │                             │
-                            │  ComfyUI  :8188  ◀── ──────┘
-                            │  (already running,          │
-                            │   not managed here)         │
-                            └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+Bob thinks → writes prompt → Charly paints → Dylan describes → Alice critiques → Bob thinks → …
 ```
 
-### One loop iteration
-
-```
-Bob thinks → writes prompt → Charly paints → Dylan looks → Alice critiques → Bob thinks → …
-```
-
-In detail:
-
-1. **Bob** receives the current prompt and Alice's last critique. He rewrites or refines the prompt, then calls the `paint_image` tool.
-2. **`paint_image`** POSTs the prompt to the ComfyUI REST API (`/prompt`), polls `/history` until generation is complete, downloads the PNG, and saves it to `./output/iter_NNNN.png`.
-3. **Alice** receives the image path and calls `describe_image`.
-4. **`describe_image`** sends the image to Dylan (a local vision model via Ollama) and returns a rich textual description.
-5. **Alice** reads Dylan's description and writes a structured critique: what works, what should change, one concrete suggestion for Bob.
-6. Bob receives Alice's critique. The next iteration begins.
-
-All images are saved. A `history.json` log records every prompt, critique, and image path.
+For the full architecture and implementation detail, see [design.md](design.md).
 
 ---
 
@@ -84,14 +39,13 @@ All images are saved. A `history.json` log records every prompt, critique, and i
 
 | Component | Technology | Where it runs |
 |---|---|---|
-| Agent framework | CrewAI | orchestrator container |
+| Orchestrator | Plain Python loop | orchestrator container |
 | LLM inference | Ollama (ROCm) | ollama container |
 | Image generation | ComfyUI + Stable Diffusion | **host, already running on :8188** |
 | GPU | AMD Radeon (ROCm 6.4) | host |
 
-### Why ComfyUI is not in this compose file
+ComfyUI is not in this compose file — it runs as a separate host process at `localhost:8188` and is reached from inside the container via `host.docker.internal:8188`. No changes to the existing ComfyUI setup are needed.
 
-ComfyUI is already running as a separate Docker container on the host at `localhost:8188` and has its own working setup — ROCm drivers, model volumes, custom nodes — that should not be disturbed. The orchestrator reaches it via `host.docker.internal:8188`, a standard Docker mechanism that resolves to the host's gateway IP from inside a container.
 ---
 
 ## Project Layout
@@ -101,14 +55,15 @@ aesthetic-loop/
 ├── docker-compose.yml          # Ollama + orchestrator only
 ├── .env.example                # copy to .env before first run
 ├── check-gpu.sh                # ROCm pre-flight diagnostic
+├── workflow.json               # your ComfyUI workflow export (gitignored)
 ├── output/                     # generated images land here (bind-mounted)
 └── orchestrator/
     ├── Dockerfile
     ├── requirements.txt
     └── src/
         ├── main.py             # iteration loop
-        ├── agents.py           # Bob and Alice definitions
-        └── tools.py            # paint_image and describe_image tools
+        ├── agents.py           # Bob and Alice
+        └── tools.py            # paint_image and describe_image
 ```
 
 ---
@@ -118,25 +73,25 @@ aesthetic-loop/
 **Prerequisites:** Docker with Compose v2, AMD Radeon GPU, ComfyUI already running on `:8188`.
 
 ```bash
-# 1. Run the pre-flight GPU check
+# 1. Run the pre-flight check
 bash check-gpu.sh
 
-# 2. Configure
+# 2. Export your ComfyUI workflow
+#    File → Save (API Format) → workflow.json
+#    Make sure the positive CLIPTextEncode node contains the text %PROMPT%
+
+# 3. Configure
 cp .env.example .env
-
-# Add your render group GID (required for ROCm device access)
 echo "RENDER_GID=$(getent group render | cut -d: -f3)" >> .env
+# Edit .env and set SD_CHECKPOINT to your checkpoint filename
 
-# Set your SD checkpoint filename (must exist in ComfyUI's models/checkpoints/)
-# Edit .env and update SD_CHECKPOINT
-
-# 3. Start
+# 4. Start
 docker compose up
 ```
 
 On first start, `ollama-pull` downloads the three models (~30 GB total). Subsequent starts are instant — models live on a named Docker volume.
 
-Images appear in `./output/` as `iter_0001.png`, `iter_0002.png`, etc.
+Images appear in `./output/` as `iter_0001.png`, `iter_0002.png`, etc. Every prompt, description, and critique is logged to `./output/history.json`.
 
 ---
 

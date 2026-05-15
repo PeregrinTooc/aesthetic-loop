@@ -1,0 +1,60 @@
+networks:
+  aesthetic_net:
+
+volumes:
+  ollama_models:
+
+services:
+  ollama:
+    image: ollama/ollama:rocm
+    networks: [aesthetic_net]
+    volumes:
+      - ollama_models:/root/.ollama
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    ports:
+      - "11434:11434"
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION:-}
+    restart: unless-stopped
+
+  ollama-pull:
+    image: ollama/ollama:rocm
+    networks: [aesthetic_net]
+    volumes:
+      - ollama_models:/root/.ollama
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - BOB_MODEL=${BOB_MODEL:-gemma3:12b}
+      - ALICE_MODEL=${ALICE_MODEL:-mistral-small3.1:latest}
+      - DYLAN_MODEL=${DYLAN_MODEL:-qwen2.5vl:7b}
+    entrypoint: >
+      sh -c "
+        echo 'Waiting for Ollama to be ready...' &&
+        until ollama list > /dev/null 2>&1; do sleep 2; done &&
+        echo 'Pulling Bob model: '$$BOB_MODEL &&
+        ollama pull $$BOB_MODEL &&
+        echo 'Pulling Alice model: '$$ALICE_MODEL &&
+        ollama pull $$ALICE_MODEL &&
+        echo 'Pulling Dylan model: '$$DYLAN_MODEL &&
+        ollama pull $$DYLAN_MODEL &&
+        echo 'All models ready.'
+      "
+    restart: "no"
+
+  orchestrator:
+    build: ./orchestrator
+    networks: [aesthetic_net]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    env_file: .env
+    volumes:
+      - ./output:/output
+      - ./workflow.json:/workflow.json:ro
+    restart: on-failure
