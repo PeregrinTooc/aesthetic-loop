@@ -86,6 +86,17 @@ def paint_image(prompt: str, iter_num: int) -> str:
         f.write(img_resp.content)
 
     print(f"  [ComfyUI] saved {out_path}")
+
+    try:
+        requests.post(
+            f"{COMFYUI_BASE_URL}/free",
+            json={"unload_models": True, "free_memory": True},
+            timeout=10,
+        )
+        print("  [ComfyUI] VRAM freed")
+    except Exception:
+        pass
+
     return out_path
 
 
