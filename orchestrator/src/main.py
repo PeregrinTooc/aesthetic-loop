@@ -3,8 +3,10 @@ import os
 import tempfile
 from datetime import datetime
 
+import requests
+
 from agents import Alice, Bob
-from tools import describe_image, paint_image
+from tools import COMFYUI_BASE_URL, describe_image, paint_image
 
 INITIAL_PROMPT = os.environ.get("INITIAL_PROMPT", "a mountain landscape at golden hour, photorealistic, cinematic lighting")
 MAX_ITERATIONS = int(os.environ.get("MAX_ITERATIONS", "50"))
@@ -35,6 +37,14 @@ def main() -> None:
     history = []
 
     log(f"Starting aesthetic loop — {MAX_ITERATIONS} iterations")
+
+    try:
+        requests.post(f"{COMFYUI_BASE_URL}/queue", json={"clear": True}, timeout=5)
+        requests.post(f"{COMFYUI_BASE_URL}/interrupt", timeout=5)
+        log("ComfyUI queue cleared")
+    except Exception:
+        pass
+
     log(f"Initial prompt: {current_prompt}")
 
     for iter_num in range(1, MAX_ITERATIONS + 1):

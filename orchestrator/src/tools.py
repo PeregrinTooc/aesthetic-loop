@@ -9,8 +9,8 @@ import requests
 COMFYUI_BASE_URL = os.environ.get("COMFYUI_BASE_URL", "http://host.docker.internal:8188")
 WORKFLOW_PATH = os.environ.get("WORKFLOW_PATH", "/workflow.json")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/output")
-DYLAN_MODEL = os.environ.get("DYLAN_MODEL", "qwen2.5vl:7b")
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
+DYLAN_MODEL = os.environ.get("DYLAN_MODEL", "qwen2.5vl:3b")
+DYLAN_HOST = os.environ.get("DYLAN_HOST", "http://dylan:11434")
 
 
 def paint_image(prompt: str, iter_num: int) -> str:
@@ -26,6 +26,7 @@ def paint_image(prompt: str, iter_num: int) -> str:
             node["inputs"]["seed"] = random.randint(0, 2**32 - 1)
 
     client_id = str(uuid.uuid4())
+    print(f"  [ComfyUI] posting prompt to {COMFYUI_BASE_URL}...")
     resp = requests.post(
         f"{COMFYUI_BASE_URL}/prompt",
         json={"prompt": workflow, "client_id": client_id},
@@ -33,11 +34,28 @@ def paint_image(prompt: str, iter_num: int) -> str:
     )
     resp.raise_for_status()
     prompt_id = resp.json()["prompt_id"]
+    print(f"  [ComfyUI] queued {prompt_id}")
 
-    print(f"  [ComfyUI] queued prompt_id={prompt_id}, polling...")
+    PAINT_TIMEOUT = 300  # seconds
+    deadline = time.monotonic() + PAINT_TIMEOUT
+    last_log = time.monotonic()
+    LOG_INTERVAL = 15
+
     while True:
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"ComfyUI timed out after {PAINT_TIMEOUT}s for {prompt_id}")
+
+        elapsed = time.monotonic() - (deadline - PAINT_TIMEOUT)
+        if time.monotonic() - last_log >= LOG_INTERVAL:
+            queue = requests.get(f"{COMFYUI_BASE_URL}/queue", timeout=5).json()
+            running = len(queue.get("queue_running", []))
+            pending = len(queue.get("queue_pending", []))
+            print(f"  [ComfyUI] waiting... {elapsed:.0f}s elapsed | running={running} pending={pending}")
+            last_log = time.monotonic()
+
         hist = requests.get(f"{COMFYUI_BASE_URL}/history/{prompt_id}", timeout=10).json()
         if prompt_id in hist:
+            print(f"  [ComfyUI] done in {elapsed:.0f}s")
             break
         time.sleep(2)
 
@@ -68,18 +86,6 @@ def paint_image(prompt: str, iter_num: int) -> str:
         f.write(img_resp.content)
 
     print(f"  [ComfyUI] saved {out_path}")
-
-    # Free VRAM so Ollama can use the GPU for inference
-    try:
-        requests.post(
-            f"{COMFYUI_BASE_URL}/free",
-            json={"unload_models": True, "free_memory": True},
-            timeout=10,
-        )
-        print("  [ComfyUI] models unloaded from VRAM")
-    except Exception as e:
-        print(f"  [ComfyUI] /free call failed (non-fatal): {e}")
-
     return out_path
 
 
@@ -88,7 +94,7 @@ def describe_image(image_path: str) -> str:
         b64 = base64.b64encode(f.read()).decode()
 
     resp = requests.post(
-        f"{OLLAMA_HOST}/api/generate",
+        f"{DYLAN_HOST}/api/generate",
         json={
             "model": DYLAN_MODEL,
             "prompt": "Describe this image in rich detail: composition, colours, mood, textures, and any notable visual elements.",
@@ -98,4 +104,17 @@ def describe_image(image_path: str) -> str:
         timeout=120,
     )
     resp.raise_for_status()
-    return resp.json()["response"].strip()
+    result = resp.json()["response"].strip()
+
+    # unload Dylan immediately so ComfyUI has full VRAM for the next paint
+    try:
+        requests.post(
+            f"{DYLAN_HOST}/api/generate",
+            json={"model": DYLAN_MODEL, "keep_alive": 0},
+            timeout=10,
+        )
+        print("  [Dylan] model unloaded from VRAM")
+    except Exception:
+        pass
+
+    return result

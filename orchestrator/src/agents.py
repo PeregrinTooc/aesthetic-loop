@@ -2,7 +2,8 @@ import os
 
 import requests
 
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
+BOB_HOST = os.environ.get("BOB_HOST", "http://bob:11434")
+ALICE_HOST = os.environ.get("ALICE_HOST", "http://alice:11434")
 BOB_MODEL = os.environ.get("BOB_MODEL", "gemma3:12b")
 ALICE_MODEL = os.environ.get("ALICE_MODEL", "mistral-small3.1:latest")
 
@@ -30,9 +31,9 @@ Be direct. Avoid vague praise. Your direction must be something Bob can act on i
 """
 
 
-def _chat(model: str, system: str, user_message: str) -> str:
+def _chat(host: str, model: str, system: str, user_message: str) -> str:
     resp = requests.post(
-        f"{OLLAMA_HOST}/api/chat",
+        f"{host}/api/chat",
         json={
             "model": model,
             "messages": [
@@ -41,7 +42,7 @@ def _chat(model: str, system: str, user_message: str) -> str:
             ],
             "stream": False,
         },
-        timeout=180,
+        timeout=600,
     )
     resp.raise_for_status()
     return resp.json()["message"]["content"].strip()
@@ -60,10 +61,10 @@ class Bob:
                 f"Starting prompt:\n{current_prompt}\n\n"
                 "Polish this into a strong Stable Diffusion prompt."
             )
-        return _chat(BOB_MODEL, BOB_SYSTEM, user_msg)
+        return _chat(BOB_HOST, BOB_MODEL, BOB_SYSTEM, user_msg)
 
 
 class Alice:
     def critique(self, description: str) -> str:
         user_msg = f"Image description:\n{description}"
-        return _chat(ALICE_MODEL, ALICE_SYSTEM, user_msg)
+        return _chat(ALICE_HOST, ALICE_MODEL, ALICE_SYSTEM, user_msg)

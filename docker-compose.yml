@@ -5,7 +5,21 @@ volumes:
   ollama_models:
 
 services:
-  ollama:
+  bob:
+    image: ollama/ollama
+    networks: [aesthetic_net]
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+
+  alice:
+    image: ollama/ollama
+    networks: [aesthetic_net]
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+
+  dylan:
     image: ollama/ollama:rocm
     networks: [aesthetic_net]
     volumes:
@@ -13,24 +27,22 @@ services:
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
-    ports:
-      - "11434:11434"
     environment:
       - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION:-}
     restart: unless-stopped
 
   ollama-pull:
-    image: ollama/ollama:rocm
+    image: ollama/ollama
     networks: [aesthetic_net]
     volumes:
       - ollama_models:/root/.ollama
     depends_on:
-      - ollama
+      - bob
     environment:
-      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_HOST=http://bob:11434
       - BOB_MODEL=${BOB_MODEL:-gemma3:12b}
       - ALICE_MODEL=${ALICE_MODEL:-mistral-small3.1:latest}
-      - DYLAN_MODEL=${DYLAN_MODEL:-qwen2.5vl:7b}
+      - DYLAN_MODEL=${DYLAN_MODEL:-qwen2.5vl:3b}
     entrypoint: >
       sh -c "
         echo 'Waiting for Ollama to be ready...' &&
@@ -57,4 +69,4 @@ services:
     volumes:
       - ./output:/output
       - ./workflow.json:/workflow.json:ro
-    restart: on-failure
+    restart: "no"
