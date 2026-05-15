@@ -1,2 +1,4 @@
 ollama
 requests
+weasyprint
+markdown2
